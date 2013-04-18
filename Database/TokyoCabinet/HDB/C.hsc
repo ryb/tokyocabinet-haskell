@@ -4,6 +4,7 @@ module Database.TokyoCabinet.HDB.C where
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.C.String
+import Foreign.ForeignPtr
 
 import Data.Int
 import Data.Word
@@ -53,6 +54,8 @@ tuningOptionToWord8 TEXCODEC = #const HDBTEXCODEC
 combineTuningOption :: [TuningOption] -> Word8
 combineTuningOption = foldr ((.|.) . tuningOptionToWord8) 0
 
+data HDB = HDB { unTCHDB :: !(ForeignPtr HDB') }
+
 data HDB'
 
 foreign import ccall "&tchdbdel"
@@ -66,6 +69,9 @@ foreign import ccall safe "tchdbdel"
 
 foreign import ccall safe "tchdbecode"
   c_tchdbecode :: Ptr HDB' -> IO CInt
+
+foreign import ccall safe "tchdb.h tchdbsetmutex"
+  c_tchdbsetmutex :: Ptr HDB' -> IO Bool
 
 foreign import ccall safe "tchdbtune"
   c_tchdbtune :: Ptr HDB' -> Int64 -> Int8 -> Int8 -> Word8 -> IO Bool

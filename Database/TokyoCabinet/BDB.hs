@@ -18,6 +18,7 @@ module Database.TokyoCabinet.BDB
     , setcache
     , setxmsiz
     , setcmpfunc
+    , setmutex
     , open
     , close
     , put
@@ -73,7 +74,7 @@ import Database.TokyoCabinet.Sequence
 --    import qualified Database.TokyoCabinet.BDB.Cursor as C
 -- @
 --
--- @  
+-- @
 --    main :: IO ()
 --    main =
 --        do bdb <- new
@@ -100,7 +101,7 @@ import Database.TokyoCabinet.Sequence
 --          err bdb = flip unless $ ecode bdb >>= error . show
 -- @
 --
--- @  
+-- @
 --          iter :: C.BDBCUR -> IO [(String, String)]
 --          iter cur = do
 --            [key, value] <- sequence [C.key cur, C.val cur]
@@ -116,13 +117,13 @@ data CMP = CMPLEXICAL |
            CMPINT64 |
            CMP (ByteString -> ByteString -> Ordering)
 
--- | Create a B+ tree database object. 
+-- | Create a B+ tree database object.
 new :: IO BDB
 new = BDB `fmap` (c_tcbdbnew >>= newForeignPtr tcbdbFinalizer)
 
--- | Free BDB resource forcibly. 
+-- | Free BDB resource forcibly.
 -- BDB is kept by ForeignPtr, so Haskell runtime GC cleans up memory for
--- almost situation. Most always, you don't need to call this. 
+-- almost situation. Most always, you don't need to call this.
 -- After call this, you must not touch BDB object. Its behavior is undefined.
 delete :: BDB -> IO ()
 delete bdb = finalizeForeignPtr (unTCBDB bdb)
@@ -135,7 +136,7 @@ ecode bdb = cintToError `fmap` withForeignPtr (unTCBDB bdb) c_tcbdbecode
 tune :: BDB   -- ^ BDB object
      -> Int32 -- ^ the number of members in each leaf page.
      -> Int32 -- ^ the number of members in each non-leaf page.
-     -> Int64 -- ^ the number of elements of the bucket array. 
+     -> Int64 -- ^ the number of elements of the bucket array.
      -> Int8  -- ^ the size of record alignment by power of 2.
      -> Int8  -- ^ the maximum number of elements of the free block
               -- pool by power of 2.
@@ -182,6 +183,11 @@ setcmpfunc bdb (CMP func) =
                    EQ -> return 0
                    GT -> return 1
 
+-- | Used in order to set mutual exclusion control of a B+ tree database
+-- object for threading.
+setmutex :: BDB -> IO Bool
+setmutex bdb = withForeignPtr (unTCBDB bdb) c_tcbdbsetmutex
+
 -- | Open BDB database file.
 open :: BDB -> String -> [OpenMode] -> IO Bool
 open = openHelper c_tcbdbopen unTCBDB combineOpenMode
@@ -206,11 +212,11 @@ putkeep = putHelper c_tcbdbputkeep unTCBDB
 putcat :: (Storable k, Storable v) => BDB -> k -> v -> IO Bool
 putcat = putHelper c_tcbdbputcat unTCBDB
 
--- | Store a record with allowing duplication of keys. 
+-- | Store a record with allowing duplication of keys.
 putdup :: (Storable k, Storable v) => BDB -> k -> v -> IO Bool
 putdup = putHelper c_tcbdbputdup unTCBDB
 
--- | Store records with allowing duplication of keys. 
+-- | Store records with allowing duplication of keys.
 putlist :: (Storable k, Storable v, Sequence q) =>
            BDB -> k -> q v -> IO Bool
 putlist bdb key vals =
@@ -231,7 +237,7 @@ putlist bdb key vals =
                 | otherwise = return True
 
 -- | Delete a record. If the key of duplicated records is specified,
--- the first one is deleted. 
+-- the first one is deleted.
 out :: (Storable k) => BDB -> k -> IO Bool
 out = outHelper c_tcbdbout unTCBDB
 
@@ -245,7 +251,7 @@ outlist = outHelper c_tcbdbout3 unTCBDB
 get :: (Storable k, Storable v) => BDB -> k -> IO (Maybe v)
 get = getHelper c_tcbdbget unTCBDB
 
--- | Retrieve records. 
+-- | Retrieve records.
 getlist :: (Storable k, Storable v, Sequence q) => BDB -> k -> IO (q v)
 getlist bdb key =
     withForeignPtr (unTCBDB bdb) $ \bdb' ->
@@ -255,7 +261,7 @@ getlist bdb key =
             then empty
             else peekList' ptr
 
--- | Return the number of records corresponding to a key. 
+-- | Return the number of records corresponding to a key.
 vnum :: (Storable k) => BDB -> k -> IO (Maybe Int)
 vnum bdb key =
     withForeignPtr (unTCBDB bdb) $ \bdb' ->
@@ -276,7 +282,7 @@ range :: (Storable k, Sequence q) =>
       -> Maybe k -- ^ the key of the beginning border. If it is
                  -- Nothing, the first record in the database is
                  -- specified.
-      -> Bool    -- ^ whether the beginning border is inclusive or not. 
+      -> Bool    -- ^ whether the beginning border is inclusive or not.
       -> Maybe k -- ^ the key of the ending border. If it is Nothing,
                  -- the last record is specified.
       -> Bool    -- ^ whether the ending border is inclusive or not.
@@ -329,7 +335,7 @@ sync bdb = withForeignPtr (unTCBDB bdb) c_tcbdbsync
 optimize :: BDB
          -> Int32 -- ^ the number of members in each leaf page.
          -> Int32 -- ^ the number of members in each non-leaf page.
-         -> Int64 -- ^ the number of elements of the bucket array. 
+         -> Int64 -- ^ the number of elements of the bucket array.
          -> Int8  -- ^ the size of record alignment by power of 2.
          -> Int8  -- ^ the maximum number of elements of the free block
                   -- pool by power of 2.

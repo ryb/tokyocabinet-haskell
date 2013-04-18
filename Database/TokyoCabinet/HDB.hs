@@ -16,6 +16,7 @@ module Database.TokyoCabinet.HDB
     , tune
     , setcache
     , setxmsiz
+    , setmutex
     , open
     , close
     , put
@@ -88,27 +89,25 @@ import Database.TokyoCabinet.Storable
 --                              maybe (error \"something goes wrong\") putStrLn
 -- @
 --
--- @  
+-- @
 --          err :: HDB -> Bool -> IO ()
 --          err hdb = flip unless $ ecode hdb >>= error . show
 -- @
 --
--- @    
+-- @
 --          iter :: HDB -> IO [String]
 --          iter hdb = iternext hdb >>=
 --                     maybe (return []) (\x -> return . (x:) =<< iter hdb)
 -- @
 --
 
-data HDB = HDB { unTCHDB :: !(ForeignPtr HDB') }
-
--- | Create a Hash database object. 
+-- | Create a Hash database object.
 new :: IO HDB
 new = HDB `fmap` (c_tchdbnew >>= newForeignPtr tchdbFinalizer)
 
--- | Free HDB resource forcibly. 
+-- | Free HDB resource forcibly.
 -- HDB is kept by ForeignPtr, so Haskell runtime GC cleans up memory for
--- almost situation. Most always, you don't need to call this. 
+-- almost situation. Most always, you don't need to call this.
 -- After call this, you must not touch HDB object. Its behavior is undefined.
 delete :: HDB -> IO ()
 delete hdb = finalizeForeignPtr (unTCHDB hdb)
@@ -120,7 +119,7 @@ ecode hdb = cintToError `fmap` withForeignPtr (unTCHDB hdb) c_tchdbecode
 -- | Set the tuning parameters.
 tune :: HDB   -- ^ HDB object
      -> Int64 -- ^ the number of elements of the bucket array.
-     -> Int8  -- ^ the size of record alignment by power of 2. 
+     -> Int8  -- ^ the size of record alignment by power of 2.
      -> Int8  -- ^ the maximum number of elements of the free block
               -- pool by power of 2.
      -> [TuningOption] -- ^ tuning options.
@@ -138,6 +137,11 @@ setcache hdb rcnum = withForeignPtr (unTCHDB hdb) (flip c_tchdbsetcache rcnum)
 -- | Set the size of extra mapped memory.
 setxmsiz :: HDB -> Int64 -> IO Bool
 setxmsiz hdb xmsiz = withForeignPtr (unTCHDB hdb) (flip c_tchdbsetxmsiz xmsiz)
+
+-- | Used in order to set mutual exclusion control of a hash database object
+-- for threading.
+setmutex :: HDB -> IO Bool
+setmutex hdb = withForeignPtr (unTCHDB hdb) c_tchdbsetmutex
 
 -- | Open a database file.
 open :: HDB -> String -> [OpenMode] -> IO Bool
@@ -171,7 +175,7 @@ putasync = putHelper c_tchdbputasync unTCHDB
 out :: (Storable k) => HDB -> k -> IO Bool
 out = outHelper c_tchdbout unTCHDB
 
--- | Return the value of record. 
+-- | Return the value of record.
 get :: (Storable k, Storable v) => HDB -> k -> IO (Maybe v)
 get = getHelper c_tchdbget unTCHDB
 
@@ -210,12 +214,12 @@ sync hdb = withForeignPtr (unTCHDB hdb) c_tchdbsync
 -- |  Optimize the file of a Hash database object.
 optimize :: HDB   -- ^ HDB object
          -> Int64 -- ^ the number of elements of the bucket array.
-         -> Int8  -- ^ the size of record alignment by power of 2. 
+         -> Int8  -- ^ the size of record alignment by power of 2.
          -> Int8  -- ^ the maximum number of elements of the free block
                   -- pool by power of 2.
          -> [TuningOption] -- ^ tuning options.
          -> IO Bool -- ^ if successful, the return value is True.
-optimize hdb bnum apow fpow options = 
+optimize hdb bnum apow fpow options =
     withForeignPtr (unTCHDB hdb) $ \p ->
         c_tchdboptimize p bnum apow fpow (combineTuningOption options)
 

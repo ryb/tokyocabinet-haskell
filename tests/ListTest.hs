@@ -20,6 +20,9 @@ len_test = do
   (==1) `fmap` len xs @? "1 element again"
   pop xs :: IO (Maybe String)
   (==0) `fmap` len xs @? "empty again"
+  sequence $ replicate 50 (push xs "50")
+  print =<< len xs
+  (==50) `fmap` len xs @? "50 elements"
   delete xs
 
 push_pop_test = do
